@@ -94,20 +94,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
         statusItem.menu = menu
 
-        // 5. Side-button drag; global monitor because the window ignores all mouse events
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.otherMouseDown, .otherMouseDragged, .otherMouseUp]) { [weak self] event in
-            guard let self, sideButtons.contains(event.buttonNumber) else { return }
+        // 5. Side-button press and release; the ticker moves the digits while held,
+        // since dragged events don't carry a reliable button number
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.otherMouseDown, .otherMouseUp]) { [weak self] event in
+            guard let self else { return }
             let mouse = self.window.convertPoint(fromScreen: NSEvent.mouseLocation)
             switch event.type {
             case .otherMouseDown:
-                if self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
+                if sideButtons.contains(event.buttonNumber), self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
                     self.dragGrab = CGPoint(x: mouse.x - self.digits.frame.origin.x,
                                             y: mouse.y - self.digits.frame.origin.y)
                     self.dragStart = mouse
                 }
-            case .otherMouseDragged:
-                guard let grab = self.dragGrab else { return }
-                self.digits.setFrameOrigin(self.clamped(CGPoint(x: mouse.x - grab.x, y: mouse.y - grab.y)))
             case .otherMouseUp:
                 guard self.dragGrab != nil else { return }
                 self.dragGrab = nil
@@ -123,9 +121,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // 6. One ticker drives both the hover fade and the countdown
-        let ticker = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+        let ticker = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             let mouse = self.window.convertPoint(fromScreen: NSEvent.mouseLocation)
+            if let grab = self.dragGrab {
+                self.digits.setFrameOrigin(self.clamped(CGPoint(x: mouse.x - grab.x, y: mouse.y - grab.y)))
+            }
             let hovering = self.dragGrab != nil || self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse)
             let target = hovering ? hoverAlpha : idleAlpha
             if abs(self.digits.alphaValue - target) > 0.01 {
@@ -177,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func refresh() {
         let color = phase == .work ? NSColor.systemRed : NSColor.systemGreen
         for layer in tintLayers {
-            layer.colors = [color.withAlphaComponent(0).cgColor, color.withAlphaComponent(0.5).cgColor]
+            layer.colors = [color.withAlphaComponent(0).cgColor, color.withAlphaComponent(0.22).cgColor]
             layer.opacity = endDate == nil ? 0 : 1
         }
         startPauseItem.title = endDate != nil ? "Pause" : (pausedRemaining != nil ? "Resume" : "Start")
