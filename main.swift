@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var digits: NSTextField!
     var tintLayers: [CAGradientLayer] = []
     var startPauseItem: NSMenuItem!
+    var autoStartItem: NSMenuItem!
     var statusItem: NSStatusItem!
     var sizeSlider: NSSlider!
     let chime = NSSound(named: "Glass")
@@ -49,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var digitsSize: CGFloat = 100
     var digitsFontName: String?
     var digitsIdleAlpha: CGFloat = 0.15
+    var autoContinue = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -60,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let v = defaults.object(forKey: "digitsSize") as? Double { digitsSize = CGFloat(v) }
         if let v = defaults.object(forKey: "digitsAlpha") as? Double { digitsIdleAlpha = CGFloat(v) }
         digitsFontName = defaults.string(forKey: "digitsFont")
+        if let v = defaults.object(forKey: "autoContinue") as? Bool { autoContinue = v }
         if let data = defaults.data(forKey: "tintColor"),
            let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: data) {
             tintColor = color
@@ -116,6 +119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let resetItem = NSMenuItem(title: "Reset", action: #selector(reset), keyEquivalent: "")
         resetItem.target = self
         menu.addItem(resetItem)
+        autoStartItem = NSMenuItem(title: "Auto-start next interval", action: #selector(toggleAutoContinue), keyEquivalent: "")
+        autoStartItem.target = self
+        autoStartItem.state = autoContinue ? .on : .off
+        menu.addItem(autoStartItem)
         menu.addItem(.separator())
 
         menu.addItem(sliderItem("Border opacity", min: 0.05, max: 1, value: Double(tintAlpha), action: #selector(tintAlphaChanged)).0)
@@ -212,10 +219,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard var end = endDate else { return }
             if end.timeIntervalSinceNow <= 0 {
                 phase = phase.next
-                end = Date().addingTimeInterval(phase.duration)
-                endDate = end
                 chime?.play()
-                refresh()
+                if autoContinue {
+                    end = Date().addingTimeInterval(phase.duration)
+                    endDate = end
+                    refresh()
+                } else {
+                    endDate = nil
+                    digits.stringValue = clock(phase.duration)
+                    refresh()
+                    return
+                }
             }
             let seconds = Int(max(0, end.timeIntervalSinceNow).rounded(.up))
             if seconds != lastSecond {
@@ -266,6 +280,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         layoutTint()
         saveSettings()
         previewTint()
+    }
+
+    @objc func toggleAutoContinue() {
+        autoContinue.toggle()
+        autoStartItem.state = autoContinue ? .on : .off
+        saveSettings()
     }
 
     @objc func swatchPicked(_ sender: NSButton) {
@@ -359,6 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defaults.set(Double(digitsSize), forKey: "digitsSize")
         defaults.set(digitsFontName, forKey: "digitsFont")
         defaults.set(Double(digitsIdleAlpha), forKey: "digitsAlpha")
+        defaults.set(autoContinue, forKey: "autoContinue")
     }
 
     func previewTint() {

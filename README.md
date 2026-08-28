@@ -1,6 +1,6 @@
 # pomo
 
-Ambient pomodoro overlay for macOS. A full-screen, always-on-top, fully click-through window shows faint timer digits and tints the screen edges while a pomodoro is running (red for work, green for break). Cycles 25/5 until paused.
+Ambient pomodoro overlay for macOS. A full-screen, always-on-top, fully click-through window shows faint timer digits and tints the screen edges while a pomodoro is running (red for work, green for break). Alternates 25-minute work and 5-minute break intervals; "Auto-start next interval" in the menu controls whether the next one begins on its own or waits for Start.
 
 ## Build and run
 
