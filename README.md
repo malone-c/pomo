@@ -16,8 +16,7 @@ Requires the Xcode command line tools (`swiftc`).
 - **Menu bar 🍅** — Start/Pause, Reset, Quit.
 - **Hover** the digits to make them readable; move away and they fade back out.
 - **Cmd-click the digits**: hold and drag to reposition them (position is remembered); a quick tap toggles start/pause.
-- **Side mouse buttons** (back/forward) work the same way, if your mouse delivers them to macOS as real button presses.
-- Plain clicks never touch the overlay — they always pass through to whatever is underneath.
+- **Side mouse buttons** (back/forward) work the same way.
 
 ## Notes
 
