@@ -16,6 +16,8 @@ enum Phase {
     var next: Phase { self == .work ? .rest : .work }
 }
 
+let tintPalette: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemTeal, .systemBlue, .systemPurple]
+
 let tintEdges: [(start: CGPoint, end: CGPoint, side: CGRectEdge)] = [
     (CGPoint(x: 0.5, y: 0), CGPoint(x: 0.5, y: 1), .maxYEdge),
     (CGPoint(x: 0.5, y: 1), CGPoint(x: 0.5, y: 0), .minYEdge),
@@ -116,30 +118,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(resetItem)
         menu.addItem(.separator())
 
-        let borderMenu = NSMenu()
-        borderMenu.addItem(sliderItem("Opacity", min: 0.05, max: 1, value: Double(tintAlpha), action: #selector(tintAlphaChanged)).0)
-        borderMenu.addItem(sliderItem("Width", min: 20, max: 400, value: Double(tintWidth), action: #selector(tintWidthChanged)).0)
-        let colorItem = NSMenuItem(title: "Colour…", action: #selector(pickTintColor), keyEquivalent: "")
-        colorItem.target = self
-        borderMenu.addItem(colorItem)
-        let borderItem = NSMenuItem(title: "Border", action: nil, keyEquivalent: "")
-        menu.addItem(borderItem)
-        menu.setSubmenu(borderMenu, for: borderItem)
+        menu.addItem(sliderItem("Border opacity", min: 0.05, max: 1, value: Double(tintAlpha), action: #selector(tintAlphaChanged)).0)
+        menu.addItem(sliderItem("Border width", min: 20, max: 400, value: Double(tintWidth), action: #selector(tintWidthChanged)).0)
 
-        let timerMenu = NSMenu()
-        let (sizeItem, sizeControl) = sliderItem("Size", min: 40, max: 300, value: Double(digitsSize), action: #selector(digitsSizeChanged))
+        let colourRow = NSView(frame: NSRect(x: 0, y: 0, width: 188, height: 42))
+        let colourTitle = NSTextField(labelWithString: "Border colour")
+        colourTitle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        colourTitle.textColor = .secondaryLabelColor
+        colourTitle.frame = NSRect(x: 14, y: 26, width: 160, height: 14)
+        colourRow.addSubview(colourTitle)
+        for (index, color) in tintPalette.enumerated() {
+            let swatch = NSButton(title: "", target: self, action: #selector(swatchPicked))
+            swatch.isBordered = false
+            swatch.wantsLayer = true
+            swatch.layer?.backgroundColor = color.cgColor
+            swatch.layer?.cornerRadius = 9
+            swatch.layer?.borderWidth = 1
+            swatch.layer?.borderColor = NSColor.tertiaryLabelColor.cgColor
+            swatch.frame = NSRect(x: 12 + index * 24, y: 4, width: 18, height: 18)
+            swatch.tag = index
+            colourRow.addSubview(swatch)
+        }
+        let customSwatch = NSButton(title: "…", target: self, action: #selector(pickTintColor))
+        customSwatch.isBordered = false
+        customSwatch.frame = NSRect(x: 156, y: 3, width: 24, height: 20)
+        colourRow.addSubview(customSwatch)
+        let colourItem = NSMenuItem()
+        colourItem.view = colourRow
+        menu.addItem(colourItem)
+
+        let (sizeItem, sizeControl) = sliderItem("Timer size", min: 40, max: 300, value: Double(digitsSize), action: #selector(digitsSizeChanged))
         sizeSlider = sizeControl
-        timerMenu.addItem(sizeItem)
-        timerMenu.addItem(sliderItem("Opacity", min: 0.02, max: 0.9, value: Double(digitsIdleAlpha), action: #selector(digitsAlphaChanged)).0)
-        let fontItem = NSMenuItem(title: "Font…", action: #selector(pickFont), keyEquivalent: "")
+        menu.addItem(sizeItem)
+        menu.addItem(sliderItem("Timer opacity", min: 0.02, max: 0.9, value: Double(digitsIdleAlpha), action: #selector(digitsAlphaChanged)).0)
+        let fontItem = NSMenuItem(title: "Timer font…", action: #selector(pickFont), keyEquivalent: "")
         fontItem.target = self
-        timerMenu.addItem(fontItem)
-        let timerItem = NSMenuItem(title: "Timer", action: nil, keyEquivalent: "")
-        menu.addItem(timerItem)
-        menu.setSubmenu(timerMenu, for: timerItem)
+        menu.addItem(fontItem)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Cmd-click the digits: tap to start/pause, hold to drag", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Cmd-drag digits to move", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Quit Pomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.target = NSApp
@@ -251,6 +268,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         previewTint()
     }
 
+    @objc func swatchPicked(_ sender: NSButton) {
+        tintColor = tintPalette[sender.tag]
+        saveSettings()
+        previewTint()
+    }
+
     @objc func pickTintColor() {
         let panel = NSColorPanel.shared
         panel.setTarget(self)
@@ -301,15 +324,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func sliderItem(_ label: String, min: Double, max: Double, value: Double, action: Selector) -> (NSMenuItem, NSSlider) {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 42))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 188, height: 42))
         let title = NSTextField(labelWithString: label)
         title.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 14, y: 24, width: 172, height: 14)
+        title.frame = NSRect(x: 14, y: 24, width: 160, height: 14)
         container.addSubview(title)
         let slider = NSSlider(value: value, minValue: min, maxValue: max, target: self, action: action)
         slider.isContinuous = true
-        slider.frame = NSRect(x: 12, y: 2, width: 176, height: 20)
+        slider.frame = NSRect(x: 12, y: 2, width: 164, height: 20)
         container.addSubview(slider)
         let item = NSMenuItem()
         item.view = container
