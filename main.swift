@@ -18,13 +18,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var tintLayers: [CAGradientLayer] = []
     var startPauseItem: NSMenuItem!
     var statusItem: NSStatusItem!
-    var mouseMonitor: Any?
 
     var phase = Phase.work
     var endDate: Date?
     var pausedRemaining: TimeInterval?
     var dragGrab: CGPoint?
     var dragStart = CGPoint.zero
+    var sideWasHeld = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -95,26 +95,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
         statusItem.menu = menu
 
-        // 5. A side-button press on the digits grabs them; the ticker tracks the hold
-        // by polling button state, since up/dragged events from remapping drivers are unreliable
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.otherMouseDown]) { [weak self] event in
-            guard let self, sideButtons.contains(event.buttonNumber) else { return }
-            let mouse = self.window.convertPoint(fromScreen: NSEvent.mouseLocation)
-            if self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
-                self.dragGrab = CGPoint(x: mouse.x - self.digits.frame.origin.x,
-                                        y: mouse.y - self.digits.frame.origin.y)
-                self.dragStart = mouse
-                NSLog("pomo: button %ld down on digits, pressed mask %ld", event.buttonNumber, NSEvent.pressedMouseButtons)
-            }
-        }
-
-        // 6. One ticker drives both the hover fade and the countdown
+        // 5. One ticker drives the side-button drag, the hover fade, and the countdown.
+        // Button state is polled rather than event-monitored: global event monitors are
+        // TCC-gated, and NSEvent.pressedMouseButtons needs no permissions
         let ticker = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             let mouse = self.window.convertPoint(fromScreen: NSEvent.mouseLocation)
+            let sideHeld = NSEvent.pressedMouseButtons & sideButtonMask != 0
+            if sideHeld, !self.sideWasHeld, self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
+                self.dragGrab = CGPoint(x: mouse.x - self.digits.frame.origin.x,
+                                        y: mouse.y - self.digits.frame.origin.y)
+                self.dragStart = mouse
+                NSLog("pomo: side button grabbed digits")
+            }
+            self.sideWasHeld = sideHeld
             if let grab = self.dragGrab {
                 self.digits.setFrameOrigin(self.clamped(CGPoint(x: mouse.x - grab.x, y: mouse.y - grab.y)))
-                if NSEvent.pressedMouseButtons & sideButtonMask == 0 {
+                if !sideHeld {
                     self.dragGrab = nil
                     let moved = hypot(mouse.x - self.dragStart.x, mouse.y - self.dragStart.y)
                     NSLog("pomo: side button released, moved %.0fpt", moved)
