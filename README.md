@@ -15,10 +15,11 @@ Requires the Xcode command line tools (`swiftc`).
 
 - **Menu bar 🍅** — Start/Pause, Reset, Quit.
 - **Hover** the digits to make them readable; move away and they fade back out.
-- **Side mouse button** (back/forward, e.g. Mouse 5 on a Logitech M650): hold on the digits and drag to reposition them (position is remembered); a quick tap on the digits toggles start/pause.
-- Normal clicks never touch the overlay — they always pass through to whatever is underneath.
+- **Cmd-click the digits**: hold and drag to reposition them (position is remembered); a quick tap toggles start/pause.
+- **Side mouse buttons** (back/forward) work the same way, if your mouse delivers them to macOS as real button presses.
+- Plain clicks never touch the overlay — they always pass through to whatever is underneath.
 
 ## Notes
 
-- The side-button events are observed, not consumed, so the app under the cursor also sees them (a browser may interpret Mouse 5 as "forward").
-- If Logi Options+ remaps the side buttons to gestures or keystrokes, set them back to default back/forward for dragging to work.
+- The overlay window is fully click-through; presses are detected by polling button state, not by receiving events. The app under the cursor therefore also sees every press, including cmd-clicks on the digits.
+- Mouse remapping software (Logi Options+, OpenLogi, ...) often delivers side buttons as instant synthetic clicks or not at all; cmd-click always works.

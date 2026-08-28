@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var pausedRemaining: TimeInterval?
     var dragGrab: CGPoint?
     var dragStart = CGPoint.zero
-    var sideWasHeld = false
+    var grabWasHeld = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         layoutTint()
 
-        // 3. The digits: faint, opaque under the cursor, draggable with a side button
+        // 3. The digits: faint, opaque under the cursor, movable by cmd-click or side-button drag
         digits = NSTextField(labelWithString: clock(workDuration))
         digits.font = .monospacedDigitSystemFont(ofSize: 100, weight: .thin)
         digits.textColor = .white
@@ -88,35 +88,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         resetItem.target = self
         menu.addItem(resetItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Side mouse button: tap digits to start/pause, hold to drag", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Cmd-click the digits: tap to start/pause, hold to drag", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Quit Pomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.target = NSApp
         menu.addItem(quitItem)
         statusItem.menu = menu
 
-        // 5. One ticker drives the side-button drag, the hover fade, and the countdown.
-        // Button state is polled rather than event-monitored: global event monitors are
-        // TCC-gated, and NSEvent.pressedMouseButtons needs no permissions
+        // 5. One ticker drives dragging, the hover fade, and the countdown. Button and
+        // modifier state are polled because the window never receives events
         let ticker = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             let mouse = self.window.convertPoint(fromScreen: NSEvent.mouseLocation)
-            let sideHeld = NSEvent.pressedMouseButtons & sideButtonMask != 0
-            if sideHeld, !self.sideWasHeld, self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
+            let mask = NSEvent.pressedMouseButtons
+            let grabHeld = mask & sideButtonMask != 0
+                || (mask & 1 != 0 && NSEvent.modifierFlags.contains(.command))
+            if grabHeld, !self.grabWasHeld, self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
                 self.dragGrab = CGPoint(x: mouse.x - self.digits.frame.origin.x,
                                         y: mouse.y - self.digits.frame.origin.y)
                 self.dragStart = mouse
-                NSLog("pomo: side button grabbed digits")
             }
-            self.sideWasHeld = sideHeld
+            self.grabWasHeld = grabHeld
             if let grab = self.dragGrab {
                 self.digits.setFrameOrigin(self.clamped(CGPoint(x: mouse.x - grab.x, y: mouse.y - grab.y)))
-                if !sideHeld {
+                if mask & (sideButtonMask | 1) == 0 {
                     self.dragGrab = nil
-                    let moved = hypot(mouse.x - self.dragStart.x, mouse.y - self.dragStart.y)
-                    NSLog("pomo: side button released, moved %.0fpt", moved)
                     // A press without movement is a tap and toggles the timer
-                    if moved < 4 {
+                    if hypot(mouse.x - self.dragStart.x, mouse.y - self.dragStart.y) < 4 {
                         self.toggleRun()
                     } else {
                         UserDefaults.standard.set([self.digits.frame.origin.x, self.digits.frame.origin.y], forKey: originKey)
