@@ -3,6 +3,7 @@ import AppKit
 let workDuration: TimeInterval = 25 * 60
 let breakDuration: TimeInterval = 5 * 60
 let sideButtons = [3, 4]
+let sideButtonMask = sideButtons.reduce(0) { $0 | (1 << $1) }
 let tintThickness: CGFloat = 140
 let idleAlpha: CGFloat = 0.15
 let hoverAlpha: CGFloat = 0.9
@@ -94,29 +95,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
         statusItem.menu = menu
 
-        // 5. Side-button press and release; the ticker moves the digits while held,
-        // since dragged events don't carry a reliable button number
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.otherMouseDown, .otherMouseUp]) { [weak self] event in
-            guard let self else { return }
+        // 5. A side-button press on the digits grabs them; the ticker tracks the hold
+        // by polling button state, since up/dragged events from remapping drivers are unreliable
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.otherMouseDown]) { [weak self] event in
+            guard let self, sideButtons.contains(event.buttonNumber) else { return }
             let mouse = self.window.convertPoint(fromScreen: NSEvent.mouseLocation)
-            switch event.type {
-            case .otherMouseDown:
-                if sideButtons.contains(event.buttonNumber), self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
-                    self.dragGrab = CGPoint(x: mouse.x - self.digits.frame.origin.x,
-                                            y: mouse.y - self.digits.frame.origin.y)
-                    self.dragStart = mouse
-                }
-            case .otherMouseUp:
-                guard self.dragGrab != nil else { return }
-                self.dragGrab = nil
-                // A press without movement is a tap and toggles the timer
-                if hypot(mouse.x - self.dragStart.x, mouse.y - self.dragStart.y) < 4 {
-                    self.toggleRun()
-                } else {
-                    UserDefaults.standard.set([self.digits.frame.origin.x, self.digits.frame.origin.y], forKey: originKey)
-                }
-            default:
-                break
+            if self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
+                self.dragGrab = CGPoint(x: mouse.x - self.digits.frame.origin.x,
+                                        y: mouse.y - self.digits.frame.origin.y)
+                self.dragStart = mouse
+                NSLog("pomo: button %ld down on digits, pressed mask %ld", event.buttonNumber, NSEvent.pressedMouseButtons)
             }
         }
 
@@ -126,6 +114,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let mouse = self.window.convertPoint(fromScreen: NSEvent.mouseLocation)
             if let grab = self.dragGrab {
                 self.digits.setFrameOrigin(self.clamped(CGPoint(x: mouse.x - grab.x, y: mouse.y - grab.y)))
+                if NSEvent.pressedMouseButtons & sideButtonMask == 0 {
+                    self.dragGrab = nil
+                    let moved = hypot(mouse.x - self.dragStart.x, mouse.y - self.dragStart.y)
+                    NSLog("pomo: side button released, moved %.0fpt", moved)
+                    // A press without movement is a tap and toggles the timer
+                    if moved < 4 {
+                        self.toggleRun()
+                    } else {
+                        UserDefaults.standard.set([self.digits.frame.origin.x, self.digits.frame.origin.y], forKey: originKey)
+                    }
+                }
             }
             let hovering = self.dragGrab != nil || self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse)
             let target = hovering ? hoverAlpha : idleAlpha
