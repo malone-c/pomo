@@ -96,14 +96,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
 
         // 5. One ticker drives dragging, the hover fade, and the countdown. Button and
-        // modifier state are polled because the window never receives events
-        let ticker = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        // modifier state are polled because the window normally receives no events
+        let ticker = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             let mouse = self.window.convertPoint(fromScreen: NSEvent.mouseLocation)
+            let overDigits = self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse)
+            let cmdHeld = NSEvent.modifierFlags.contains(.command)
+            // Cmd over the digits makes the window catch the click so it can't reach the app behind
+            let wantsClicks = self.dragGrab != nil || (cmdHeld && overDigits)
+            if self.window.ignoresMouseEvents == wantsClicks {
+                self.window.ignoresMouseEvents = !wantsClicks
+            }
             let mask = NSEvent.pressedMouseButtons
-            let grabHeld = mask & sideButtonMask != 0
-                || (mask & 1 != 0 && NSEvent.modifierFlags.contains(.command))
-            if grabHeld, !self.grabWasHeld, self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse) {
+            let grabHeld = mask & sideButtonMask != 0 || (mask & 1 != 0 && cmdHeld)
+            if grabHeld, !self.grabWasHeld, overDigits {
                 self.dragGrab = CGPoint(x: mouse.x - self.digits.frame.origin.x,
                                         y: mouse.y - self.digits.frame.origin.y)
                 self.dragStart = mouse
@@ -121,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             }
-            let hovering = self.dragGrab != nil || self.digits.frame.insetBy(dx: -24, dy: -24).contains(mouse)
+            let hovering = self.dragGrab != nil || overDigits
             let target = hovering ? hoverAlpha : idleAlpha
             if abs(self.digits.alphaValue - target) > 0.01 {
                 NSAnimationContext.runAnimationGroup { context in

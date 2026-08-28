@@ -21,5 +21,5 @@ Requires the Xcode command line tools (`swiftc`).
 
 ## Notes
 
-- The overlay window is fully click-through; presses are detected by polling button state, not by receiving events. The app under the cursor therefore also sees every press, including cmd-clicks on the digits.
+- The overlay window is click-through, except while cmd is held over the digits — those clicks are caught by the overlay and never reach the app behind. Presses are detected by polling button state, so side-button presses still pass through.
 - Mouse remapping software (Logi Options+, OpenLogi, ...) often delivers side buttons as instant synthetic clicks or not at all; cmd-click always works.
