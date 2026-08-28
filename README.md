@@ -13,7 +13,7 @@ Requires the Xcode command line tools (`swiftc`).
 
 ## Controls
 
-- **Menu bar 🍅** — Start/Pause, Reset, Quit.
+- **Menu bar 🍅** — Start/Pause, Reset, Quit, and appearance settings: Border (opacity, width, colour) and Timer (size, opacity, font). Settings persist; border tweaks preview the tint for a moment when the timer is idle.
 - **Hover** the digits to make them readable; move away and they fade back out.
 - **Cmd-click the digits**: hold and drag to reposition them (position is remembered); a quick tap toggles start/pause.
 - **Side mouse buttons** (back/forward) work the same way.

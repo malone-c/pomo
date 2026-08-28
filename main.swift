@@ -3,9 +3,6 @@ import AppKit
 let workDuration: TimeInterval = 25 * 60
 let breakDuration: TimeInterval = 5 * 60
 let sideButtonMask = 1 << 3 | 1 << 4
-let tintThickness: CGFloat = 140
-let tintAlpha: CGFloat = 0.22
-let idleAlpha: CGFloat = 0.15
 let hoverAlpha: CGFloat = 0.9
 let fadeDuration: TimeInterval = 0.2
 let hitSlop: CGFloat = 24
@@ -16,7 +13,6 @@ enum Phase {
     case work, rest
 
     var duration: TimeInterval { self == .work ? workDuration : breakDuration }
-    var tint: NSColor { self == .work ? .systemRed : .systemGreen }
     var next: Phase { self == .work ? .rest : .work }
 }
 
@@ -34,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var tintLayers: [CAGradientLayer] = []
     var startPauseItem: NSMenuItem!
     var statusItem: NSStatusItem!
+    var sizeSlider: NSSlider!
     let chime = NSSound(named: "Glass")
 
     var phase = Phase.work
@@ -42,11 +39,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var drag: (grab: CGPoint, start: CGPoint)?
     var grabWasHeld = false
     var lastSecond = -1
+    var previewUntil: Date?
+
+    var tintColor = NSColor.systemRed
+    var tintAlpha: CGFloat = 0.22
+    var tintWidth: CGFloat = 140
+    var digitsSize: CGFloat = 100
+    var digitsFontName: String?
+    var digitsIdleAlpha: CGFloat = 0.15
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // 1. Full-screen transparent window, click-through except while cmd is held over the digits
+        // 1. Saved appearance settings
+        let defaults = UserDefaults.standard
+        if let v = defaults.object(forKey: "tintAlpha") as? Double { tintAlpha = CGFloat(v) }
+        if let v = defaults.object(forKey: "tintWidth") as? Double { tintWidth = CGFloat(v) }
+        if let v = defaults.object(forKey: "digitsSize") as? Double { digitsSize = CGFloat(v) }
+        if let v = defaults.object(forKey: "digitsAlpha") as? Double { digitsIdleAlpha = CGFloat(v) }
+        digitsFontName = defaults.string(forKey: "digitsFont")
+        if let data = defaults.data(forKey: "tintColor"),
+           let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: data) {
+            tintColor = color
+        }
+
+        // 2. Full-screen transparent window, click-through except while cmd is held over the digits
         let screen = NSScreen.screens.first!
         window = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isOpaque = false
@@ -57,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         window.contentView!.wantsLayer = true
 
-        // 2. Edge tint: one gradient per screen edge, fading toward the center
+        // 3. Edge tint: one gradient per screen edge, fading toward the center
         for edge in tintEdges {
             let gradient = CAGradientLayer()
             gradient.startPoint = edge.start
@@ -68,18 +85,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         layoutTint()
 
-        // 3. The digits: faint, opaque under the cursor, movable by cmd-click or side-button drag
+        // 4. The digits: faint, opaque under the cursor, movable by cmd-click or side-button drag
         digits = NSTextField(labelWithString: clock(workDuration))
-        digits.font = .monospacedDigitSystemFont(ofSize: 100, weight: .thin)
         digits.textColor = .white
         digits.alignment = .center
         digits.wantsLayer = true
-        digits.alphaValue = idleAlpha
+        digits.alphaValue = digitsIdleAlpha
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.8)
         shadow.shadowBlurRadius = 5
         digits.shadow = shadow
-        digits.sizeToFit()
+        applyDigitsFont()
         var origin = CGPoint(x: (screen.frame.width - digits.frame.width) / 2,
                              y: (screen.frame.height - digits.frame.height) / 2)
         if let saved = UserDefaults.standard.string(forKey: originKey) {
@@ -88,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         digits.setFrameOrigin(clamped(origin))
         window.contentView!.addSubview(digits)
 
-        // 4. Menu bar item, the only clickable control surface
+        // 5. Menu bar item, the only clickable control surface
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🍅"
         let menu = NSMenu()
@@ -99,6 +115,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         resetItem.target = self
         menu.addItem(resetItem)
         menu.addItem(.separator())
+
+        let borderMenu = NSMenu()
+        borderMenu.addItem(sliderItem("Opacity", min: 0.05, max: 1, value: Double(tintAlpha), action: #selector(tintAlphaChanged)).0)
+        borderMenu.addItem(sliderItem("Width", min: 20, max: 400, value: Double(tintWidth), action: #selector(tintWidthChanged)).0)
+        let colorItem = NSMenuItem(title: "Colour…", action: #selector(pickTintColor), keyEquivalent: "")
+        colorItem.target = self
+        borderMenu.addItem(colorItem)
+        let borderItem = NSMenuItem(title: "Border", action: nil, keyEquivalent: "")
+        menu.addItem(borderItem)
+        menu.setSubmenu(borderMenu, for: borderItem)
+
+        let timerMenu = NSMenu()
+        let (sizeItem, sizeControl) = sliderItem("Size", min: 40, max: 300, value: Double(digitsSize), action: #selector(digitsSizeChanged))
+        sizeSlider = sizeControl
+        timerMenu.addItem(sizeItem)
+        timerMenu.addItem(sliderItem("Opacity", min: 0.02, max: 0.9, value: Double(digitsIdleAlpha), action: #selector(digitsAlphaChanged)).0)
+        let fontItem = NSMenuItem(title: "Font…", action: #selector(pickFont), keyEquivalent: "")
+        fontItem.target = self
+        timerMenu.addItem(fontItem)
+        let timerItem = NSMenuItem(title: "Timer", action: nil, keyEquivalent: "")
+        menu.addItem(timerItem)
+        menu.setSubmenu(timerMenu, for: timerItem)
+
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Cmd-click the digits: tap to start/pause, hold to drag", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Quit Pomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -106,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
         statusItem.menu = menu
 
-        // 5. One ticker drives dragging, the hover fade, and the countdown. Button and
+        // 6. One ticker drives dragging, the hover fade, and the countdown. Button and
         // modifier state are polled because the window normally receives no events
         let ticker = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -140,12 +180,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             }
-            let target = drag != nil || overDigits ? hoverAlpha : idleAlpha
+            let target = drag != nil || overDigits ? hoverAlpha : digitsIdleAlpha
             if abs(digits.alphaValue - target) > 0.01 {
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = fadeDuration
                     self.digits.animator().alphaValue = target
                 }
+            }
+            if let preview = previewUntil, preview.timeIntervalSinceNow <= 0 {
+                previewUntil = nil
+                refresh()
             }
             // Countdown; stays last in the tick because it returns whenever the timer is idle
             guard var end = endDate else { return }
@@ -194,11 +238,120 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
     }
 
+    @objc func tintAlphaChanged(_ sender: NSSlider) {
+        tintAlpha = CGFloat(sender.doubleValue)
+        saveSettings()
+        previewTint()
+    }
+
+    @objc func tintWidthChanged(_ sender: NSSlider) {
+        tintWidth = CGFloat(sender.doubleValue)
+        layoutTint()
+        saveSettings()
+        previewTint()
+    }
+
+    @objc func pickTintColor() {
+        let panel = NSColorPanel.shared
+        panel.setTarget(self)
+        panel.setAction(#selector(tintColorChanged))
+        panel.color = tintColor
+        panel.showsAlpha = false
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    @objc func tintColorChanged(_ sender: NSColorPanel) {
+        tintColor = sender.color
+        saveSettings()
+        previewTint()
+    }
+
+    @objc func digitsSizeChanged(_ sender: NSSlider) {
+        digitsSize = CGFloat(sender.doubleValue)
+        applyDigitsFont()
+        saveSettings()
+    }
+
+    @objc func digitsAlphaChanged(_ sender: NSSlider) {
+        digitsIdleAlpha = CGFloat(sender.doubleValue)
+        saveSettings()
+    }
+
+    @objc func pickFont() {
+        let manager = NSFontManager.shared
+        manager.target = self
+        if let font = digits.font {
+            manager.setSelectedFont(font, isMultiple: false)
+        }
+        NSFontPanel.shared.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+        NSApp.activate(ignoringOtherApps: true)
+        manager.orderFrontFontPanel(nil)
+    }
+
+    @objc func changeFont(_ sender: Any?) {
+        guard let manager = sender as? NSFontManager, let current = digits.font else { return }
+        let converted = manager.convert(current)
+        digitsFontName = converted.fontName
+        digitsSize = converted.pointSize
+        sizeSlider.doubleValue = Double(digitsSize)
+        applyDigitsFont()
+        saveSettings()
+    }
+
+    func sliderItem(_ label: String, min: Double, max: Double, value: Double, action: Selector) -> (NSMenuItem, NSSlider) {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 42))
+        let title = NSTextField(labelWithString: label)
+        title.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        title.textColor = .secondaryLabelColor
+        title.frame = NSRect(x: 14, y: 24, width: 172, height: 14)
+        container.addSubview(title)
+        let slider = NSSlider(value: value, minValue: min, maxValue: max, target: self, action: action)
+        slider.isContinuous = true
+        slider.frame = NSRect(x: 12, y: 2, width: 176, height: 20)
+        container.addSubview(slider)
+        let item = NSMenuItem()
+        item.view = container
+        return (item, slider)
+    }
+
+    func applyDigitsFont() {
+        let center = CGPoint(x: digits.frame.midX, y: digits.frame.midY)
+        let font = digitsFontName.flatMap { NSFont(name: $0, size: digitsSize) }
+            ?? .monospacedDigitSystemFont(ofSize: digitsSize, weight: .thin)
+        digits.font = font
+        // Sized for the widest possible time so later text never clips
+        let sample = ("88:88" as NSString).size(withAttributes: [.font: font])
+        digits.setFrameSize(NSSize(width: ceil(sample.width) + 10, height: ceil(sample.height) + 4))
+        digits.setFrameOrigin(clamped(CGPoint(x: center.x - digits.frame.width / 2,
+                                              y: center.y - digits.frame.height / 2)))
+    }
+
+    func saveSettings() {
+        let defaults = UserDefaults.standard
+        defaults.set(Double(tintAlpha), forKey: "tintAlpha")
+        defaults.set(Double(tintWidth), forKey: "tintWidth")
+        defaults.set(try? NSKeyedArchiver.archivedData(withRootObject: tintColor, requiringSecureCoding: true), forKey: "tintColor")
+        defaults.set(Double(digitsSize), forKey: "digitsSize")
+        defaults.set(digitsFontName, forKey: "digitsFont")
+        defaults.set(Double(digitsIdleAlpha), forKey: "digitsAlpha")
+    }
+
+    func previewTint() {
+        if endDate == nil {
+            previewUntil = Date().addingTimeInterval(2)
+        }
+        refresh()
+    }
+
     func refresh() {
-        let colors = [phase.tint.withAlphaComponent(0).cgColor, phase.tint.withAlphaComponent(tintAlpha).cgColor]
+        let tint = phase == .work ? tintColor : NSColor.systemGreen
+        let colors = [tint.withAlphaComponent(0).cgColor, tint.withAlphaComponent(tintAlpha).cgColor]
+        let visible = endDate != nil || previewUntil != nil
         for layer in tintLayers {
             layer.colors = colors
-            layer.opacity = endDate == nil ? 0 : 1
+            layer.opacity = visible ? 1 : 0
         }
         startPauseItem.title = endDate != nil ? "Pause" : (pausedRemaining != nil ? "Resume" : "Start")
     }
@@ -219,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CATransaction.setDisableActions(true)
         let bounds = window.contentView!.bounds
         for (layer, edge) in zip(tintLayers, tintEdges) {
-            layer.frame = bounds.divided(atDistance: tintThickness, from: edge.side).slice
+            layer.frame = bounds.divided(atDistance: tintWidth, from: edge.side).slice
         }
         CATransaction.commit()
     }
