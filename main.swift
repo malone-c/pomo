@@ -34,8 +34,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var autoStartItem: NSMenuItem!
     var statusItem: NSStatusItem!
     var sizeSlider: NSSlider!
-    var workLabel: NSTextField!
-    var breakLabel: NSTextField!
     let chime = NSSound(named: "Glass")
 
     var phase = Phase.work
@@ -129,12 +127,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(autoStartItem)
         menu.addItem(.separator())
 
-        let (workItem, _, workTitle) = sliderItem("Work: \(Int(workDuration) / 60) min", min: 1, max: 90, value: workDuration / 60, action: #selector(workLengthChanged))
-        workLabel = workTitle
-        menu.addItem(workItem)
-        let (breakItem, _, breakTitle) = sliderItem("Break: \(Int(breakDuration) / 60) min", min: 1, max: 30, value: breakDuration / 60, action: #selector(breakLengthChanged))
-        breakLabel = breakTitle
-        menu.addItem(breakItem)
+        menu.addItem(minutesItem("Work", value: Int(workDuration) / 60, max: 180, action: #selector(workLengthChanged)))
+        menu.addItem(minutesItem("Break", value: Int(breakDuration) / 60, max: 60, action: #selector(breakLengthChanged)))
         menu.addItem(.separator())
 
         menu.addItem(sliderItem("Border opacity", min: 0.05, max: 1, value: Double(tintAlpha), action: #selector(tintAlphaChanged)).0)
@@ -166,7 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         colourItem.view = colourRow
         menu.addItem(colourItem)
 
-        let (sizeItem, sizeControl, _) = sliderItem("Timer size", min: 40, max: 300, value: Double(digitsSize), action: #selector(digitsSizeChanged))
+        let (sizeItem, sizeControl) = sliderItem("Timer size", min: 40, max: 300, value: Double(digitsSize), action: #selector(digitsSizeChanged))
         sizeSlider = sizeControl
         menu.addItem(sizeItem)
         menu.addItem(sliderItem("Timer opacity", min: 0.02, max: 0.9, value: Double(digitsIdleAlpha), action: #selector(digitsAlphaChanged)).0)
@@ -294,15 +288,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         previewTint()
     }
 
-    @objc func workLengthChanged(_ sender: NSSlider) {
-        workDuration = sender.doubleValue.rounded() * 60
-        workLabel.stringValue = "Work: \(Int(workDuration) / 60) min"
+    @objc func workLengthChanged(_ sender: NSTextField) {
+        workDuration = TimeInterval(min(180, max(1, sender.integerValue))) * 60
+        sender.integerValue = Int(workDuration) / 60
         durationsChanged()
     }
 
-    @objc func breakLengthChanged(_ sender: NSSlider) {
-        breakDuration = sender.doubleValue.rounded() * 60
-        breakLabel.stringValue = "Break: \(Int(breakDuration) / 60) min"
+    @objc func breakLengthChanged(_ sender: NSTextField) {
+        breakDuration = TimeInterval(min(60, max(1, sender.integerValue))) * 60
+        sender.integerValue = Int(breakDuration) / 60
         durationsChanged()
     }
 
@@ -374,7 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         saveSettings()
     }
 
-    func sliderItem(_ label: String, min: Double, max: Double, value: Double, action: Selector) -> (NSMenuItem, NSSlider, NSTextField) {
+    func sliderItem(_ label: String, min: Double, max: Double, value: Double, action: Selector) -> (NSMenuItem, NSSlider) {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 188, height: 42))
         let title = NSTextField(labelWithString: label)
         title.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -387,7 +381,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.addSubview(slider)
         let item = NSMenuItem()
         item.view = container
-        return (item, slider, title)
+        return (item, slider)
+    }
+
+    func minutesItem(_ label: String, value: Int, max maxMinutes: Int, action: Selector) -> NSMenuItem {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 188, height: 30))
+        let title = NSTextField(labelWithString: label)
+        title.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        title.textColor = .secondaryLabelColor
+        title.frame = NSRect(x: 14, y: 8, width: 80, height: 16)
+        container.addSubview(title)
+        let formatter = NumberFormatter()
+        formatter.allowsFloats = false
+        formatter.minimum = 1
+        formatter.maximum = NSNumber(value: maxMinutes)
+        let field = NSTextField(string: "\(value)")
+        field.formatter = formatter
+        field.alignment = .right
+        field.frame = NSRect(x: 96, y: 4, width: 50, height: 22)
+        field.target = self
+        field.action = action
+        field.cell?.sendsActionOnEndEditing = true
+        container.addSubview(field)
+        let suffix = NSTextField(labelWithString: "min")
+        suffix.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        suffix.textColor = .secondaryLabelColor
+        suffix.frame = NSRect(x: 152, y: 8, width: 30, height: 16)
+        container.addSubview(suffix)
+        let item = NSMenuItem()
+        item.view = container
+        return item
     }
 
     func applyDigitsFont() {
