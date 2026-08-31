@@ -134,11 +134,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(sliderItem("Border opacity", min: 0.05, max: 1, value: Double(tintAlpha), action: #selector(tintAlphaChanged)).0)
         menu.addItem(sliderItem("Border width", min: 20, max: 400, value: Double(tintWidth), action: #selector(tintWidthChanged)).0)
 
-        let colourRow = NSView(frame: NSRect(x: 0, y: 0, width: 188, height: 42))
+        let colourRow = NSView(frame: NSRect(x: 0, y: 0, width: 250, height: 42))
+        colourRow.autoresizingMask = [.width]
         let colourTitle = NSTextField(labelWithString: "Border colour")
         colourTitle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         colourTitle.textColor = .secondaryLabelColor
-        colourTitle.frame = NSRect(x: 14, y: 26, width: 160, height: 14)
+        colourTitle.frame = NSRect(x: 25, y: 26, width: 180, height: 14)
         colourRow.addSubview(colourTitle)
         for (index, color) in tintPalette.enumerated() {
             let swatch = NSButton(title: "", target: self, action: #selector(swatchPicked))
@@ -148,17 +149,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             swatch.layer?.cornerRadius = 9
             swatch.layer?.borderWidth = 1
             swatch.layer?.borderColor = NSColor.tertiaryLabelColor.cgColor
-            swatch.frame = NSRect(x: 12 + index * 24, y: 4, width: 18, height: 18)
+            swatch.frame = NSRect(x: 25 + index * 25, y: 4, width: 18, height: 18)
             swatch.tag = index
             colourRow.addSubview(swatch)
         }
         let customSwatch = NSButton(title: "…", target: self, action: #selector(pickTintColor))
         customSwatch.isBordered = false
-        customSwatch.frame = NSRect(x: 156, y: 3, width: 24, height: 20)
+        customSwatch.frame = NSRect(x: 25 + tintPalette.count * 25, y: 3, width: 24, height: 20)
         colourRow.addSubview(customSwatch)
         let colourItem = NSMenuItem()
         colourItem.view = colourRow
         menu.addItem(colourItem)
+        menu.addItem(.separator())
 
         let (sizeItem, sizeControl) = sliderItem("Timer size", min: 40, max: 300, value: Double(digitsSize), action: #selector(digitsSizeChanged))
         sizeSlider = sizeControl
@@ -369,15 +371,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func sliderItem(_ label: String, min: Double, max: Double, value: Double, action: Selector) -> (NSMenuItem, NSSlider) {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 188, height: 42))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 250, height: 42))
+        container.autoresizingMask = [.width]
         let title = NSTextField(labelWithString: label)
         title.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 14, y: 24, width: 160, height: 14)
+        title.frame = NSRect(x: 25, y: 24, width: 180, height: 14)
         container.addSubview(title)
         let slider = NSSlider(value: value, minValue: min, maxValue: max, target: self, action: action)
         slider.isContinuous = true
-        slider.frame = NSRect(x: 12, y: 2, width: 164, height: 20)
+        slider.frame = NSRect(x: 23, y: 2, width: 211, height: 20)
+        slider.autoresizingMask = [.width]
         container.addSubview(slider)
         let item = NSMenuItem()
         item.view = container
@@ -385,12 +389,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func minutesItem(_ label: String, value: Int, max maxMinutes: Int, action: Selector) -> NSMenuItem {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 188, height: 30))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 250, height: 30))
+        container.autoresizingMask = [.width]
         let title = NSTextField(labelWithString: label)
-        title.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        title.textColor = .secondaryLabelColor
-        title.frame = NSRect(x: 14, y: 8, width: 80, height: 16)
+        title.font = .menuFont(ofSize: 0)
+        title.frame = NSRect(x: 25, y: 6, width: 120, height: 18)
         container.addSubview(title)
+        let suffix = NSTextField(labelWithString: "min")
+        suffix.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        suffix.textColor = .secondaryLabelColor
+        suffix.frame = NSRect(x: 208, y: 8, width: 26, height: 16)
+        suffix.autoresizingMask = [.minXMargin]
+        container.addSubview(suffix)
         let formatter = NumberFormatter()
         formatter.allowsFloats = false
         formatter.minimum = 1
@@ -398,16 +408,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let field = NSTextField(string: "\(value)")
         field.formatter = formatter
         field.alignment = .right
-        field.frame = NSRect(x: 96, y: 4, width: 50, height: 22)
+        field.controlSize = .small
+        field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        field.frame = NSRect(x: 156, y: 5, width: 48, height: 19)
+        field.autoresizingMask = [.minXMargin]
         field.target = self
         field.action = action
         field.cell?.sendsActionOnEndEditing = true
         container.addSubview(field)
-        let suffix = NSTextField(labelWithString: "min")
-        suffix.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        suffix.textColor = .secondaryLabelColor
-        suffix.frame = NSRect(x: 152, y: 8, width: 30, height: 16)
-        container.addSubview(suffix)
         let item = NSMenuItem()
         item.view = container
         return item
