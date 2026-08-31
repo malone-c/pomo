@@ -2,6 +2,7 @@ import AppKit
 
 var workDuration: TimeInterval = 25 * 60
 var breakDuration: TimeInterval = 5 * 60
+var longBreakDuration: TimeInterval = 25 * 60
 let sideButtonMask = 1 << 3 | 1 << 4
 let hoverAlpha: CGFloat = 0.9
 let fadeDuration: TimeInterval = 0.2
@@ -10,10 +11,15 @@ let tapThreshold: CGFloat = 4
 let originKey = "digitsOrigin"
 
 enum Phase {
-    case work, rest
+    case work, rest, longRest
 
-    var duration: TimeInterval { self == .work ? workDuration : breakDuration }
-    var next: Phase { self == .work ? .rest : .work }
+    var duration: TimeInterval {
+        switch self {
+        case .work: workDuration
+        case .rest: breakDuration
+        case .longRest: longBreakDuration
+        }
+    }
 }
 
 let tintPalette: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemTeal, .systemBlue, .systemPurple]
@@ -42,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var drag: (grab: CGPoint, start: CGPoint)?
     var grabWasHeld = false
     var lastSecond = -1
+    var workCount = 0
     var previewUntil: Date?
 
     var tintColor = NSColor.systemRed
@@ -65,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let v = defaults.object(forKey: "autoContinue") as? Bool { autoContinue = v }
         if let v = defaults.object(forKey: "workDuration") as? Double { workDuration = v }
         if let v = defaults.object(forKey: "breakDuration") as? Double { breakDuration = v }
+        if let v = defaults.object(forKey: "longBreakDuration") as? Double { longBreakDuration = v }
         if let data = defaults.data(forKey: "tintColor"),
            let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: data) {
             tintColor = color
@@ -129,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(minutesItem("Work", value: Int(workDuration) / 60, max: 180, action: #selector(workLengthChanged)))
         menu.addItem(minutesItem("Break", value: Int(breakDuration) / 60, max: 60, action: #selector(breakLengthChanged)))
+        menu.addItem(minutesItem("Long break", value: Int(longBreakDuration) / 60, max: 60, action: #selector(longBreakLengthChanged)))
         menu.addItem(.separator())
 
         menu.addItem(sliderItem("Border opacity", min: 0.05, max: 1, value: Double(tintAlpha), action: #selector(tintAlphaChanged)).0)
@@ -226,7 +235,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Countdown; stays last in the tick because it returns whenever the timer is idle
             guard var end = endDate else { return }
             if end.timeIntervalSinceNow <= 0 {
-                phase = phase.next
+                // Every 4th finished work interval earns the long break
+                if phase == .work {
+                    workCount += 1
+                    phase = workCount.isMultiple(of: 4) ? .longRest : .rest
+                } else {
+                    phase = .work
+                }
                 chime?.play()
                 if autoContinue {
                     end = Date().addingTimeInterval(phase.duration)
@@ -273,6 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         endDate = nil
         pausedRemaining = nil
         phase = .work
+        workCount = 0
         digits.stringValue = clock(workDuration)
         refresh()
     }
@@ -299,6 +315,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func breakLengthChanged(_ sender: NSTextField) {
         breakDuration = TimeInterval(min(60, max(1, sender.integerValue))) * 60
         sender.integerValue = Int(breakDuration) / 60
+        durationsChanged()
+    }
+
+    @objc func longBreakLengthChanged(_ sender: NSTextField) {
+        longBreakDuration = TimeInterval(min(60, max(1, sender.integerValue))) * 60
+        sender.integerValue = Int(longBreakDuration) / 60
         durationsChanged()
     }
 
@@ -444,6 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defaults.set(autoContinue, forKey: "autoContinue")
         defaults.set(workDuration, forKey: "workDuration")
         defaults.set(breakDuration, forKey: "breakDuration")
+        defaults.set(longBreakDuration, forKey: "longBreakDuration")
     }
 
     func previewTint() {
