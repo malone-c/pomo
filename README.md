@@ -18,6 +18,10 @@ Requires the Xcode command line tools (`swiftc`).
 - **Cmd-click the digits**: hold and drag to reposition them (position is remembered); a quick tap toggles start/pause.
 - **Side mouse buttons** (back/forward) work the same way.
 
+## History
+
+Completed work intervals are stored in a SQLite database at `~/Library/Application Support/Pomo/pomo.sqlite` (one row per session: start, end, length in minutes). The menu shows today's count and a History list with per-day totals for the last 14 days.
+
 ## Notes
 
 - The overlay window is click-through, except while cmd is held over the digits — those clicks are caught by the overlay and never reach the app behind. Presses are detected by polling button state, so side-button presses still pass through.

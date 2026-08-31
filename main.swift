@@ -1,4 +1,5 @@
 import AppKit
+import SQLite3
 
 var workDuration: TimeInterval = 25 * 60
 var breakDuration: TimeInterval = 5 * 60
@@ -24,6 +25,51 @@ enum Phase {
 
 let tintPalette: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemTeal, .systemBlue, .systemPurple]
 
+let dayKeyFormat: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    return f
+}()
+
+let dayLabelFormat: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "EEE d MMM"
+    return f
+}()
+
+var db: OpaquePointer?
+
+func openSessionsDatabase() {
+    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Pomo")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    sqlite3_open(dir.appendingPathComponent("pomo.sqlite").path, &db)
+    sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, started_at REAL NOT NULL, ended_at REAL NOT NULL, minutes REAL NOT NULL)", nil, nil, nil)
+}
+
+func recordSession(started: Date, ended: Date, minutes: Double) {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, "INSERT INTO sessions (started_at, ended_at, minutes) VALUES (?, ?, ?)", -1, &statement, nil) == SQLITE_OK else { return }
+    sqlite3_bind_double(statement, 1, started.timeIntervalSince1970)
+    sqlite3_bind_double(statement, 2, ended.timeIntervalSince1970)
+    sqlite3_bind_double(statement, 3, minutes)
+    sqlite3_step(statement)
+    sqlite3_finalize(statement)
+}
+
+func dailySessionCounts(limit: Int) -> [(day: String, count: Int)] {
+    var statement: OpaquePointer?
+    var rows: [(day: String, count: Int)] = []
+    guard sqlite3_prepare_v2(db, "SELECT date(ended_at, 'unixepoch', 'localtime') AS day, COUNT(*) FROM sessions GROUP BY day ORDER BY day DESC LIMIT ?", -1, &statement, nil) == SQLITE_OK else { return rows }
+    sqlite3_bind_int(statement, 1, Int32(limit))
+    while sqlite3_step(statement) == SQLITE_ROW {
+        if let text = sqlite3_column_text(statement, 0) {
+            rows.append((String(cString: text), Int(sqlite3_column_int(statement, 1))))
+        }
+    }
+    sqlite3_finalize(statement)
+    return rows
+}
+
 let tintEdges: [(start: CGPoint, end: CGPoint, side: CGRectEdge)] = [
     (CGPoint(x: 0.5, y: 0), CGPoint(x: 0.5, y: 1), .maxYEdge),
     (CGPoint(x: 0.5, y: 1), CGPoint(x: 0.5, y: 0), .minYEdge),
@@ -32,12 +78,14 @@ let tintEdges: [(start: CGPoint, end: CGPoint, side: CGRectEdge)] = [
 ]
 
 // AppKit requires an NSObject subclass as the app delegate; all state lives here.
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var window: NSWindow!
     var digits: NSTextField!
     var tintLayers: [CAGradientLayer] = []
     var startPauseItem: NSMenuItem!
     var autoStartItem: NSMenuItem!
+    var todayItem: NSMenuItem!
+    var historyMenu: NSMenu!
     var statusItem: NSStatusItem!
     var sizeSlider: NSSlider!
     let chime = NSSound(named: "Glass")
@@ -49,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var grabWasHeld = false
     var lastSecond = -1
     var workCount = 0
+    var workStartedAt: Date?
     var previewUntil: Date?
 
     var tintColor = NSColor.systemRed
@@ -62,7 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // 1. Saved appearance settings
+        // 1. Saved settings and the sessions database
+        openSessionsDatabase()
         let defaults = UserDefaults.standard
         if let v = defaults.object(forKey: "tintAlpha") as? Double { tintAlpha = CGFloat(v) }
         if let v = defaults.object(forKey: "tintWidth") as? Double { tintWidth = CGFloat(v) }
@@ -135,6 +185,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(autoStartItem)
         menu.addItem(.separator())
 
+        todayItem = NSMenuItem(title: "Today: 0 pomodoros", action: nil, keyEquivalent: "")
+        menu.addItem(todayItem)
+        historyMenu = NSMenu()
+        let historyItem = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
+        menu.addItem(historyItem)
+        menu.setSubmenu(historyMenu, for: historyItem)
+        menu.addItem(.separator())
+
         menu.addItem(minutesItem("Work", value: Int(workDuration) / 60, max: 180, action: #selector(workLengthChanged)))
         menu.addItem(minutesItem("Break", value: Int(breakDuration) / 60, max: 60, action: #selector(breakLengthChanged)))
         menu.addItem(minutesItem("Long break", value: Int(longBreakDuration) / 60, max: 60, action: #selector(longBreakLengthChanged)))
@@ -185,6 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let quitItem = NSMenuItem(title: "Quit Pomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.target = NSApp
         menu.addItem(quitItem)
+        menu.delegate = self
         statusItem.menu = menu
 
         // 6. One ticker drives dragging, the hover fade, and the countdown. Button and
@@ -238,6 +297,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Every 4th finished work interval earns the long break
                 if phase == .work {
                     workCount += 1
+                    recordSession(started: workStartedAt ?? end.addingTimeInterval(-workDuration), ended: Date(), minutes: workDuration / 60)
+                    workStartedAt = nil
                     phase = workCount.isMultiple(of: 4) ? .longRest : .rest
                 } else {
                     phase = .work
@@ -246,6 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if autoContinue {
                     end = Date().addingTimeInterval(phase.duration)
                     endDate = end
+                    if phase == .work { workStartedAt = Date() }
                     refresh()
                 } else {
                     endDate = nil
@@ -278,10 +340,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pausedRemaining = max(0, end.timeIntervalSinceNow)
             endDate = nil
         } else {
+            if phase == .work, pausedRemaining == nil { workStartedAt = Date() }
             endDate = Date().addingTimeInterval(pausedRemaining ?? phase.duration)
             pausedRemaining = nil
         }
         refresh()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItem.menu else { return }
+        let counts = dailySessionCounts(limit: 14)
+        let today = dayKeyFormat.string(from: Date())
+        let todayCount = counts.first(where: { $0.day == today })?.count ?? 0
+        todayItem.title = "Today: \(todayCount) pomodoro\(todayCount == 1 ? "" : "s")"
+        historyMenu.removeAllItems()
+        if counts.isEmpty {
+            historyMenu.addItem(NSMenuItem(title: "No sessions yet", action: nil, keyEquivalent: ""))
+        }
+        for row in counts {
+            let label = dayKeyFormat.date(from: row.day).map { dayLabelFormat.string(from: $0) } ?? row.day
+            historyMenu.addItem(NSMenuItem(title: "\(label) — \(row.count)", action: nil, keyEquivalent: ""))
+        }
     }
 
     @objc func reset() {
@@ -289,6 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pausedRemaining = nil
         phase = .work
         workCount = 0
+        workStartedAt = nil
         digits.stringValue = clock(workDuration)
         refresh()
     }
