@@ -15,7 +15,7 @@ Requires the Xcode command line tools (`swiftc`).
 
 - **Menu bar 🍅** — Start/Pause, Reset, Quit, and appearance settings: Border (opacity, width, colour) and Timer (size, opacity, font). Settings persist; border tweaks preview the tint for a moment when the timer is idle.
 - **Hover** the digits to make them readable; move away and they fade back out.
-- **Cmd-click the digits**: a quick tap opens a small field below the digits to type the session goal — Enter shows it under the timer for the rest of the work interval (and starts the timer if idle), Esc cancels. Hold and drag to reposition (position is remembered).
+- **Cmd-click the digits**: while running, a quick tap pauses. While idle or paused, it opens a small field below the digits to type the session goal — Enter shows it under the timer for the rest of the work interval and starts (or resumes) the timer, Esc cancels. Hold and drag to reposition (position is remembered).
 - **Cmd-scroll over the digits** to resize them.
 - **Side mouse buttons** (back/forward): tap the digits to start/pause, hold to drag.
 

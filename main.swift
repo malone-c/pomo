@@ -315,9 +315,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
                 }
                 if mask & (sideButtonMask | 1) == 0 {
                     drag = nil
-                    // A press without movement is a tap: cmd-tap edits the goal, a side-button tap toggles
+                    // A press without movement is a tap: cmd-tap pauses a running timer and
+                    // otherwise opens the goal editor; a side-button tap always toggles
                     if hypot(mouse.x - active.start.x, mouse.y - active.start.y) < tapThreshold {
-                        if cmdHeld { openGoalEditor() } else { toggleRun() }
+                        if !cmdHeld || endDate != nil {
+                            toggleRun()
+                        } else {
+                            openGoalEditor()
+                        }
                     } else {
                         UserDefaults.standard.set(NSStringFromPoint(digits.frame.origin), forKey: originKey)
                     }
