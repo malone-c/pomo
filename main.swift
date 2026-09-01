@@ -38,20 +38,28 @@ let dayLabelFormat: DateFormatter = {
 }()
 
 var db: OpaquePointer?
+let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 func openSessionsDatabase() {
     let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Pomo")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     sqlite3_open(dir.appendingPathComponent("pomo.sqlite").path, &db)
     sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, started_at REAL NOT NULL, ended_at REAL NOT NULL, minutes REAL NOT NULL)", nil, nil, nil)
+    // Fails harmlessly once the column exists
+    sqlite3_exec(db, "ALTER TABLE sessions ADD COLUMN goal TEXT", nil, nil, nil)
 }
 
-func recordSession(started: Date, ended: Date, minutes: Double) {
+func recordSession(started: Date, ended: Date, minutes: Double, goal: String?) {
     var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(db, "INSERT INTO sessions (started_at, ended_at, minutes) VALUES (?, ?, ?)", -1, &statement, nil) == SQLITE_OK else { return }
+    guard sqlite3_prepare_v2(db, "INSERT INTO sessions (started_at, ended_at, minutes, goal) VALUES (?, ?, ?, ?)", -1, &statement, nil) == SQLITE_OK else { return }
     sqlite3_bind_double(statement, 1, started.timeIntervalSince1970)
     sqlite3_bind_double(statement, 2, ended.timeIntervalSince1970)
     sqlite3_bind_double(statement, 3, minutes)
+    if let goal {
+        sqlite3_bind_text(statement, 4, goal, -1, sqliteTransient)
+    } else {
+        sqlite3_bind_null(statement, 4)
+    }
     sqlite3_step(statement)
     sqlite3_finalize(statement)
 }
@@ -77,10 +85,25 @@ let tintEdges: [(start: CGPoint, end: CGPoint, side: CGRectEdge)] = [
     (CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5), .maxXEdge),
 ]
 
+// Borderless windows refuse key status by default, and scroll events need an override.
+final class OverlayWindow: NSWindow {
+    var onCmdScroll: ((CGFloat) -> Void)?
+
+    override var canBecomeKey: Bool { true }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard event.modifierFlags.contains(.command) else { return }
+        let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY * 0.3 : event.scrollingDeltaY * 3
+        onCmdScroll?(delta)
+    }
+}
+
 // AppKit requires an NSObject subclass as the app delegate; all state lives here.
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    var window: NSWindow!
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSTextFieldDelegate {
+    var window: OverlayWindow!
     var digits: NSTextField!
+    var goalLabel: NSTextField!
+    var goalField: NSTextField!
     var tintLayers: [CAGradientLayer] = []
     var startPauseItem: NSMenuItem!
     var autoStartItem: NSMenuItem!
@@ -98,6 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var lastSecond = -1
     var workCount = 0
     var workStartedAt: Date?
+    var sessionGoal: String?
+    var editingGoal = false
     var previewUntil: Date?
 
     var tintColor = NSColor.systemRed
@@ -130,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // 2. Full-screen transparent window, click-through except while cmd is held over the digits
         let screen = NSScreen.screens.first!
-        window = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window = OverlayWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
@@ -168,6 +193,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         digits.setFrameOrigin(clamped(origin))
         window.contentView!.addSubview(digits)
+
+        // The session goal: an editor field opened by cmd-tap, and a label shown below the digits
+        goalField = NSTextField(string: "")
+        goalField.placeholderString = "What are you working on?"
+        goalField.isHidden = true
+        goalField.setFrameSize(NSSize(width: 240, height: 24))
+        goalField.target = self
+        goalField.action = #selector(goalCommitted)
+        goalField.delegate = self
+        window.contentView!.addSubview(goalField)
+        goalLabel = NSTextField(labelWithString: "")
+        goalLabel.textColor = .white
+        goalLabel.shadow = shadow
+        goalLabel.isHidden = true
+        goalLabel.alphaValue = digitsIdleAlpha
+        window.contentView!.addSubview(goalLabel)
+        applyDigitsFont()
 
         // 5. Menu bar item, the only clickable control surface
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -254,7 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let overDigits = digits.frame.insetBy(dx: -hitSlop, dy: -hitSlop).contains(mouse)
             let cmdHeld = NSEvent.modifierFlags.contains(.command)
             // Cmd over the digits makes the window catch the click so it can't reach the app behind
-            let clickThrough = drag == nil && !(cmdHeld && overDigits)
+            let clickThrough = drag == nil && !editingGoal && !(cmdHeld && overDigits)
             if window.ignoresMouseEvents != clickThrough {
                 window.ignoresMouseEvents = clickThrough
             }
@@ -269,22 +311,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let origin = clamped(CGPoint(x: mouse.x - active.grab.x, y: mouse.y - active.grab.y))
                 if origin != digits.frame.origin {
                     digits.setFrameOrigin(origin)
+                    positionGoal()
                 }
                 if mask & (sideButtonMask | 1) == 0 {
                     drag = nil
-                    // A press without movement is a tap and toggles the timer
+                    // A press without movement is a tap: cmd-tap edits the goal, a side-button tap toggles
                     if hypot(mouse.x - active.start.x, mouse.y - active.start.y) < tapThreshold {
-                        toggleRun()
+                        if cmdHeld { openGoalEditor() } else { toggleRun() }
                     } else {
                         UserDefaults.standard.set(NSStringFromPoint(digits.frame.origin), forKey: originKey)
                     }
                 }
             }
-            let target = drag != nil || overDigits ? hoverAlpha : digitsIdleAlpha
+            let target = editingGoal || drag != nil || overDigits ? hoverAlpha : digitsIdleAlpha
             if abs(digits.alphaValue - target) > 0.01 {
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = fadeDuration
                     self.digits.animator().alphaValue = target
+                    self.goalLabel.animator().alphaValue = target
                 }
             }
             if let preview = previewUntil, preview.timeIntervalSinceNow <= 0 {
@@ -297,8 +341,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // Every 4th finished work interval earns the long break
                 if phase == .work {
                     workCount += 1
-                    recordSession(started: workStartedAt ?? end.addingTimeInterval(-workDuration), ended: Date(), minutes: workDuration / 60)
+                    recordSession(started: workStartedAt ?? end.addingTimeInterval(-workDuration), ended: Date(), minutes: workDuration / 60, goal: sessionGoal)
                     workStartedAt = nil
+                    clearGoal()
                     phase = workCount.isMultiple(of: 4) ? .longRest : .rest
                 } else {
                     phase = .work
@@ -330,6 +375,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.setFrame(screen.frame, display: true)
             layoutTint()
             digits.setFrameOrigin(clamped(digits.frame.origin))
+            positionGoal()
+        }
+
+        window.onCmdScroll = { [weak self] delta in
+            guard let self else { return }
+            let mouse = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+            guard digits.frame.insetBy(dx: -hitSlop, dy: -hitSlop).contains(mouse) else { return }
+            digitsSize = min(300, max(40, digitsSize + delta))
+            sizeSlider.doubleValue = Double(digitsSize)
+            applyDigitsFont()
+            saveSettings()
         }
 
         window.orderFrontRegardless()
@@ -369,6 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         phase = .work
         workCount = 0
         workStartedAt = nil
+        clearGoal()
         digits.stringValue = clock(workDuration)
         refresh()
     }
@@ -533,6 +590,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         digits.setFrameSize(NSSize(width: ceil(sample.width) + 10, height: ceil(sample.height) + 4))
         digits.setFrameOrigin(clamped(CGPoint(x: center.x - digits.frame.width / 2,
                                               y: center.y - digits.frame.height / 2)))
+        if goalLabel != nil {
+            goalLabel.font = .systemFont(ofSize: max(12, digitsSize * 0.16), weight: .light)
+            positionGoal()
+        }
+    }
+
+    func positionGoal() {
+        goalLabel.sizeToFit()
+        goalLabel.setFrameOrigin(CGPoint(x: digits.frame.midX - goalLabel.frame.width / 2,
+                                         y: digits.frame.minY - goalLabel.frame.height - 2))
+        goalField.setFrameOrigin(CGPoint(x: digits.frame.midX - goalField.frame.width / 2,
+                                         y: digits.frame.minY - goalField.frame.height - 4))
+    }
+
+    func openGoalEditor() {
+        editingGoal = true
+        goalField.stringValue = sessionGoal ?? ""
+        goalField.setFrameSize(NSSize(width: max(240, digits.frame.width), height: 24))
+        goalLabel.isHidden = true
+        goalField.isHidden = false
+        positionGoal()
+        window.ignoresMouseEvents = false
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(goalField)
+    }
+
+    func closeGoalEditor() {
+        editingGoal = false
+        goalField.isHidden = true
+        goalLabel.stringValue = sessionGoal ?? ""
+        goalLabel.isHidden = sessionGoal == nil
+        positionGoal()
+        NSApp.deactivate()
+    }
+
+    @objc func goalCommitted() {
+        let text = goalField.stringValue.trimmingCharacters(in: .whitespaces)
+        sessionGoal = text.isEmpty ? nil : text
+        closeGoalEditor()
+        if endDate == nil { toggleRun() }
+    }
+
+    func clearGoal() {
+        sessionGoal = nil
+        goalLabel.stringValue = ""
+        goalLabel.isHidden = true
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        if editingGoal { closeGoalEditor() }
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            closeGoalEditor()
+            return true
+        }
+        return false
     }
 
     func saveSettings() {

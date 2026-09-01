@@ -15,12 +15,13 @@ Requires the Xcode command line tools (`swiftc`).
 
 - **Menu bar 🍅** — Start/Pause, Reset, Quit, and appearance settings: Border (opacity, width, colour) and Timer (size, opacity, font). Settings persist; border tweaks preview the tint for a moment when the timer is idle.
 - **Hover** the digits to make them readable; move away and they fade back out.
-- **Cmd-click the digits**: hold and drag to reposition them (position is remembered); a quick tap toggles start/pause.
-- **Side mouse buttons** (back/forward) work the same way.
+- **Cmd-click the digits**: a quick tap opens a small field below the digits to type the session goal — Enter shows it under the timer for the rest of the work interval (and starts the timer if idle), Esc cancels. Hold and drag to reposition (position is remembered).
+- **Cmd-scroll over the digits** to resize them.
+- **Side mouse buttons** (back/forward): tap the digits to start/pause, hold to drag.
 
 ## History
 
-Completed work intervals are stored in a SQLite database at `~/Library/Application Support/Pomo/pomo.sqlite` (one row per session: start, end, length in minutes). The menu shows today's count and a History list with per-day totals for the last 14 days.
+Completed work intervals are stored in a SQLite database at `~/Library/Application Support/Pomo/pomo.sqlite` (one row per session: start, end, length in minutes, and the goal if one was set). The menu shows today's count and a History list with per-day totals for the last 14 days.
 
 ## Notes
 
